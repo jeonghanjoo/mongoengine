@@ -93,6 +93,8 @@ class LazyReference(DBRef):
 
 ### 3. GridFS Async Support
 
+**Note**: Using PyMongo's native async GridFS API (gridfs.asynchronous) instead of Motor, as async support is now built into PyMongo.
+
 #### FileField Async Methods
 ```python
 class FileField(BaseField):
@@ -101,12 +103,13 @@ class FileField(BaseField):
         if is_sync_connection():
             raise RuntimeError("Use put() with sync connection")
         
-        # Use AsyncIOMotorGridFSBucket
+        # Use PyMongo's AsyncGridFSBucket
+        from gridfs.asynchronous import AsyncGridFSBucket
         db = get_db(self.db_alias)
-        fs = AsyncIOMotorGridFSBucket(db, collection=self.collection_name)
+        bucket = AsyncGridFSBucket(db, bucket_name=self.collection_name)
         
         # Store file asynchronously
-        file_id = await fs.upload_from_stream(
+        file_id = await bucket.upload_from_stream(
             kwargs.get('filename', 'unknown'),
             file_obj,
             metadata=kwargs.get('metadata')
@@ -134,20 +137,22 @@ class AsyncGridFSProxy:
     
     async def async_read(self):
         """Read file content asynchronously."""
+        from gridfs.asynchronous import AsyncGridFSBucket
         db = get_db(self.db_alias)
-        fs = AsyncIOMotorGridFSBucket(db, collection=self.collection_name)
+        bucket = AsyncGridFSBucket(db, bucket_name=self.collection_name)
         
         # Download to stream
         stream = io.BytesIO()
-        await fs.download_to_stream(self.grid_id, stream)
+        await bucket.download_to_stream(self.grid_id, stream)
         stream.seek(0)
         return stream.read()
     
     async def async_delete(self):
         """Delete file asynchronously."""
+        from gridfs.asynchronous import AsyncGridFSBucket
         db = get_db(self.db_alias)
-        fs = AsyncIOMotorGridFSBucket(db, collection=self.collection_name)
-        await fs.delete(self.grid_id)
+        bucket = AsyncGridFSBucket(db, bucket_name=self.collection_name)
+        await bucket.delete(self.grid_id)
 ```
 
 ### 4. Cascade Operations Async Support
@@ -276,6 +281,15 @@ await photo.async_save()
 # Download file
 photo = await Photo.objects.async_get(name="sunset.jpg")
 image_data = await photo.image.async_get(photo)
+
+# Alternative using PyMongo's async GridFS directly
+from gridfs.asynchronous import AsyncGridFSBucket
+db = photo._get_db()
+bucket = AsyncGridFSBucket(db)
+
+# List all files
+async for grid_out in bucket.find():
+    print(f"File: {grid_out.filename}, Size: {grid_out.length}")
 ```
 
 ## Testing Strategy
