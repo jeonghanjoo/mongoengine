@@ -1,15 +1,19 @@
 """Async context managers for MongoEngine."""
 
 import contextlib
+import logging
 
-from mongoengine.async_utils import ensure_async_connection
-from mongoengine.connection import DEFAULT_CONNECTION_NAME
+from pymongo.errors import ConnectionFailure, OperationFailure
+
+from mongoengine.async_utils import ensure_async_connection, _get_async_session, _set_async_session
+from mongoengine.connection import DEFAULT_CONNECTION_NAME, get_connection
 
 
 __all__ = (
     "async_switch_db",
     "async_switch_collection",
     "async_no_dereference",
+    "async_run_in_transaction",
 )
 
 
@@ -171,3 +175,82 @@ async def async_no_dereference(cls):
             yield None
     finally:
         _unregister_no_dereferencing_for_class(cls)
+
+
+async def _async_commit_with_retry(session):
+    """Retry commit operation for async transactions.
+    
+    :param session: The async client session to commit
+    """
+    while True:
+        try:
+            # Commit uses write concern set at transaction start
+            await session.commit_transaction()
+            break
+        except (ConnectionFailure, OperationFailure) as exc:
+            # Can retry commit
+            if exc.has_error_label("UnknownTransactionCommitResult"):
+                logging.warning(
+                    "UnknownTransactionCommitResult, retrying commit operation ..."
+                )
+                continue
+            else:
+                # Error during commit
+                raise
+
+
+@contextlib.asynccontextmanager
+async def async_run_in_transaction(
+    alias=DEFAULT_CONNECTION_NAME, session_kwargs=None, transaction_kwargs=None
+):
+    """Execute async queries within a database transaction.
+    
+    Execute queries within the context in a database transaction.
+    
+    Usage:
+    
+    .. code-block:: python
+    
+        class A(Document):
+            name = StringField()
+        
+        async with async_run_in_transaction():
+            a_doc = await A.objects.async_create(name="a")
+            await a_doc.async_update(name="b")
+    
+    Be aware that:
+    - Mongo transactions run inside a session which is bound to a connection. If you attempt to
+      execute a transaction across a different connection alias, pymongo will raise an exception. In
+      other words: you cannot create a transaction that crosses different database connections. That
+      said, multiple transaction can be nested within the same session for particular connection.
+    
+    For more information regarding pymongo transactions: https://pymongo.readthedocs.io/en/stable/api/pymongo/client_session.html#transactions
+    
+    :param alias: the database alias name to use for the transaction
+    :param session_kwargs: keyword arguments to pass to start_session()
+    :param transaction_kwargs: keyword arguments to pass to start_transaction()
+    """
+    # Ensure we're using an async connection
+    ensure_async_connection(alias)
+    
+    conn = get_connection(alias)
+    session_kwargs = session_kwargs or {}
+    
+    # Start async session
+    async with conn.start_session(**session_kwargs) as session:
+        transaction_kwargs = transaction_kwargs or {}
+        # Start the transaction
+        await session.start_transaction(**transaction_kwargs)
+        try:
+            # Set the async session for the duration of the transaction
+            await _set_async_session(session)
+            yield
+            # Commit with retry logic
+            await _async_commit_with_retry(session)
+        except Exception:
+            # Abort transaction on any exception
+            await session.abort_transaction()
+            raise
+        finally:
+            # Clear the async session
+            await _set_async_session(None)
