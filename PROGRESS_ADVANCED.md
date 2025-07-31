@@ -328,12 +328,12 @@ post_delete = AsyncSignal()
 ## Implementation Plan
 
 ### Step 1: Cascade Operations (Week 1)
-- [ ] Implement async cascade delete logic in Document
-- [ ] Add async support for CASCADE rule
-- [ ] Add async support for NULLIFY rule
-- [ ] Add async support for PULL rule
-- [ ] Add async support for DENY rule
-- [ ] Write comprehensive tests for cascade operations
+- [x] Implement async cascade delete logic in Document
+- [x] Add async support for CASCADE rule
+- [x] Add async support for NULLIFY rule
+- [x] Add async support for PULL rule
+- [x] Add async support for DENY rule
+- [x] Write comprehensive tests for cascade operations
 
 ### Step 2: Context Managers (Week 1)
 - [ ] Implement async_switch_db
