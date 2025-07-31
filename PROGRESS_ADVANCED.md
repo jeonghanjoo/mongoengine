@@ -349,11 +349,11 @@ post_delete = AsyncSignal()
 - [x] Test cross-database transactions
 
 ### Step 4: Aggregation Framework (Week 2)
-- [ ] Implement async_aggregate
-- [ ] Implement async_distinct
-- [ ] Support aggregation pipeline options
-- [ ] Add cursor management for large results
-- [ ] Write comprehensive aggregation tests
+- [x] Implement async_aggregate
+- [x] Implement async_distinct
+- [x] Support aggregation pipeline options
+- [x] Add cursor management for large results
+- [x] Write comprehensive aggregation tests
 
 ### Step 5: Field Projection (Week 2-3)
 - [ ] Implement async_values
