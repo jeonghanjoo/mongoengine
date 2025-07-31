@@ -208,6 +208,11 @@ class Document(BaseDocument, metaclass=TopLevelDocumentMetaclass):
     def _get_db(cls):
         """Some Model using other db_alias"""
         return get_db(cls._meta.get("db_alias", DEFAULT_CONNECTION_NAME))
+    
+    @classmethod
+    def _get_db_alias(cls):
+        """Get the database alias for this Document."""
+        return cls._meta.get("db_alias", DEFAULT_CONNECTION_NAME)
 
     @classmethod
     def _disconnect(cls):

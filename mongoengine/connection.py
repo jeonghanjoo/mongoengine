@@ -32,6 +32,7 @@ __all__ = [
     "disconnect_all",
     "get_connection",
     "get_db",
+    "get_async_db",
     "register_connection",
     "is_async_connection",
 ]
