@@ -6,24 +6,24 @@ MongoEngine의 QuerySet에 완전한 비동기 지원을 추가하여 효율적�
 ## 구현 범위
 
 ### 1. 기본 QuerySet 비동기 메서드
-- [ ] `async_first()` - 첫 번째 결과 반환
-- [ ] `async_get()` - 단일 문서 조회 (없으면 DoesNotExist, 여러 개면 MultipleObjectsReturned)
-- [ ] `async_count()` - 쿼리 결과 개수 반환
-- [ ] `async_to_list()` - 결과를 리스트로 변환
-- [ ] `async_exists()` - 쿼리 결과 존재 여부 확인
+- [x] `async_first()` - 첫 번째 결과 반환
+- [x] `async_get()` - 단일 문서 조회 (없으면 DoesNotExist, 여러 개면 MultipleObjectsReturned)
+- [x] `async_count()` - 쿼리 결과 개수 반환
+- [x] `async_to_list()` - 결과를 리스트로 변환
+- [x] `async_exists()` - 쿼리 결과 존재 여부 확인
 
 ### 2. 비동기 반복자
-- [ ] `__aiter__()` - 비동기 반복 지원
-- [ ] `__anext__()` - 다음 문서 반환
-- [ ] 커서 관리 및 자동 정리
-- [ ] 배치 처리 최적화
+- [x] `__aiter__()` - 비동기 반복 지원
+- [x] `__anext__()` - 다음 문서 반환
+- [x] 커서 관리 및 자동 정리
+- [x] 배치 처리 최적화
 
 ### 3. 벌크 작업
-- [ ] `async_create()` - 새 문서 생성 및 저장
-- [ ] `async_update()` - 여러 문서 업데이트
-- [ ] `async_delete()` - 여러 문서 삭제
-- [ ] `async_update_one()` - 단일 문서 업데이트
-- [ ] `async_delete_one()` - 단일 문서 삭제
+- [x] `async_create()` - 새 문서 생성 및 저장
+- [x] `async_update()` - 여러 문서 업데이트
+- [x] `async_delete()` - 여러 문서 삭제
+- [x] `async_update_one()` - 단일 문서 업데이트
+- [ ] `async_delete_one()` - 단일 문서 삭제 (async_delete로 가능)
 
 ### 4. 고급 쿼리 기능
 - [ ] `async_aggregate()` - 집계 파이프라인 실행
@@ -148,3 +148,39 @@ MongoEngine의 QuerySet에 완전한 비동기 지원을 추가하여 효율적�
 - PyMongo의 AsyncCursor API 활용
 - 기존 QuerySet 로직 최대한 재사용
 - 명확한 문서화 필요
+
+## 구현 완료 사항 (2025-07-31)
+
+### 완료된 기능
+1. **기본 비동기 쿼리 메서드**
+   - `async_first()`, `async_get()`, `async_count()`, `async_to_list()`, `async_exists()` 구현 완료
+   - 동기 메서드와 동일한 API 제공하며 `async_` 접두사 사용
+
+2. **비동기 반복자**
+   - `__aiter__()` 및 내부 `_async_iter_results()` 구현
+   - 효율적인 커서 관리 및 자동 정리 기능 포함
+   - `async for` 구문 완벽 지원
+
+3. **벌크 작업**
+   - `async_create()`, `async_update()`, `async_update_one()`, `async_delete()` 구현
+   - MongoDB 업데이트 연산자 지원 (`$inc`, `$set`, `$push` 등)
+   - MongoEngine 스타일 연산자 지원 (`inc__field`, `set__field` 등)
+
+4. **테스트**
+   - 14개의 포괄적인 단위 테스트 작성 및 통과
+   - 쿼리 체이닝, 참조 문서, as_pymongo 모드 등 다양한 시나리오 테스트
+
+### 주요 구현 세부사항
+- `_from_son()` 호출 시 `only_fields` 대신 `_auto_dereference` 파라미터 사용
+- AsyncCursor의 `close()` 메서드가 코루틴인 점 처리
+- `count_documents()`에 None 값 전달 방지 (skip/limit 처리)
+- 업데이트 연산 시 자동으로 `$set` 래핑 처리
+
+### 미구현 기능
+- `async_aggregate()`, `async_distinct()` 등 고급 쿼리 기능
+- 필드별 작업 (`async_scalar()`, `async_values()` 등)
+- 성능 최적화 및 벤치마킹
+
+### 다음 단계
+- 고급 쿼리 기능 구현은 필요시 추가 가능
+- 현재 구현으로 대부분의 일반적인 비동기 쿼리 사용 사례 충족
