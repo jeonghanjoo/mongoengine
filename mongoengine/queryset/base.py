@@ -2368,9 +2368,13 @@ class BaseQuerySet:
         update_dict = {}
         for key, value in update.items():
             # Handle operators like inc__field, set__field, etc.
-            if "__" in key and key.split("__")[0] in ["inc", "set", "unset", "push", "pull", "addToSet"]:
+            if "__" in key and key.split("__")[0] in ["inc", "set", "unset", "push", "pull", "pull_all", "addToSet"]:
                 op, field = key.split("__", 1)
-                mongo_op = f"${op}"
+                # Convert pull_all to pullAll for MongoDB
+                if op == "pull_all":
+                    mongo_op = "$pullAll"
+                else:
+                    mongo_op = f"${op}"
                 if mongo_op not in update_dict:
                     update_dict[mongo_op] = {}
                 field_name = queryset._document._translate_field_name(field)
@@ -2422,8 +2426,7 @@ class BaseQuerySet:
         if write_concern is None:
             write_concern = {}
         
-        # For now, handle simple case without signals or cascade
-        # TODO: Implement full async signal and cascade support
+        # Check for delete signals
         has_delete_signal = signals.signals_available and (
             signals.pre_delete.has_receivers_for(doc) or
             signals.post_delete.has_receivers_for(doc)
@@ -2440,8 +2443,79 @@ class BaseQuerySet:
                 cnt += 1
             return cnt
         
-        # Simple delete without cascade handling for now
+        # Handle cascade delete rules
+        delete_rules = doc._meta.get("delete_rules") or {}
+        delete_rules = list(delete_rules.items())
+        
+        # If we have delete rules, we need to get the actual documents
+        if delete_rules:
+            # Collect documents to delete once
+            docs_to_delete = []
+            async for d in self.clone():
+                docs_to_delete.append(d)
+            
+            # Check for DENY rules before actually deleting/nullifying any other references
+            for rule_entry, rule in delete_rules:
+                document_cls, field_name = rule_entry
+                if document_cls._meta.get("abstract"):
+                    continue
+                    
+                if rule == DENY:
+                    refs_count = await document_cls.objects(**{field_name + "__in": docs_to_delete}).limit(1).async_count()
+                    if refs_count > 0:
+                        raise OperationError(
+                            "Could not delete document (%s.%s refers to it)"
+                            % (document_cls.__name__, field_name)
+                        )
+            
+            # Check all the other rules
+            for rule_entry, rule in delete_rules:
+                document_cls, field_name = rule_entry
+                if document_cls._meta.get("abstract"):
+                    continue
+                    
+                if rule == CASCADE:
+                    cascade_refs = set() if cascade_refs is None else cascade_refs
+                    # Handle recursive reference
+                    if doc._collection == document_cls._collection:
+                        for ref in docs_to_delete:
+                            cascade_refs.add(ref.id)
+                    refs = document_cls.objects(
+                        **{field_name + "__in": docs_to_delete, "pk__nin": cascade_refs}
+                    )
+                    if await refs.async_count() > 0:
+                        await refs.async_delete(write_concern=write_concern, cascade_refs=cascade_refs)
+                elif rule == NULLIFY:
+                    await document_cls.objects(**{field_name + "__in": docs_to_delete}).async_update(
+                        write_concern=write_concern, **{"unset__%s" % field_name: 1}
+                    )
+                elif rule == PULL:
+                    # Convert documents to their IDs for pull operation
+                    doc_ids = [d.id for d in docs_to_delete]
+                    await document_cls.objects(**{field_name + "__in": docs_to_delete}).async_update(
+                        write_concern=write_concern, **{"pull_all__%s" % field_name: doc_ids}
+                    )
+        
+        # Perform the actual delete
         collection = await self._async_get_collection()
-        result = await collection.delete_many(self._query)
+        
+        kwargs = {}
+        if self._hint not in (-1, None):
+            kwargs["hint"] = self._hint
+        if self._collation:
+            kwargs["collation"] = self._collation
+        if self._comment:
+            kwargs["comment"] = self._comment
+            
+        # Get async session if available
+        from mongoengine.async_utils import _get_async_session
+        session = await _get_async_session()
+        if session:
+            kwargs["session"] = session
+            
+        result = await collection.delete_many(
+            queryset._query,
+            **kwargs
+        )
         
         return result.deleted_count
