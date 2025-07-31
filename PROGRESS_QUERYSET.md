@@ -184,3 +184,21 @@ MongoEngine의 QuerySet에 완전한 비동기 지원을 추가하여 효율적�
 ### 다음 단계
 - 고급 쿼리 기능 구현은 필요시 추가 가능
 - 현재 구현으로 대부분의 일반적인 비동기 쿼리 사용 사례 충족
+
+## Phase 3 대상 기능
+
+다음 기능들은 Phase 3 (필드 및 참조) 또는 Phase 4 (고급 기능)에서 구현 예정:
+
+### 고급 쿼리 기능 (Phase 4)
+- `async_aggregate()` - 집계 파이프라인 실행
+- `async_distinct()` - 고유 값 조회
+- `async_explain()` - 쿼리 실행 계획
+- `async_hint()` - 인덱스 힌트
+
+### 필드 작업 (Phase 3/4)
+- `async_scalar()` - 단일 필드 값 반환
+- `async_values()` - 딕셔너리 형태로 반환
+- `async_values_list()` - 튜플 형태로 반환
+- `async_only()` / `async_exclude()` - 필드 프로젝션 (현재 체이닝으로 가능)
+
+이러한 기능들은 기본 async 쿼리 인프라가 구축된 현재 상태에서 필요에 따라 점진적으로 추가 가능합니다.
