@@ -336,17 +336,17 @@ post_delete = AsyncSignal()
 - [x] Write comprehensive tests for cascade operations
 
 ### Step 2: Context Managers (Week 1)
-- [ ] Implement async_switch_db
-- [ ] Implement async_switch_collection
-- [ ] Implement async_no_dereference
-- [ ] Write tests for async context managers
+- [x] Implement async_switch_db
+- [x] Implement async_switch_collection
+- [x] Implement async_no_dereference
+- [x] Write tests for async context managers
 
 ### Step 3: Transaction Support (Week 1-2)
-- [ ] Implement async_run_in_transaction
-- [ ] Add async session management
-- [ ] Handle transaction commit/abort
-- [ ] Test nested transactions
-- [ ] Test cross-database transactions
+- [x] Implement async_run_in_transaction
+- [x] Add async session management
+- [x] Handle transaction commit/abort
+- [x] Test nested transactions
+- [x] Test cross-database transactions
 
 ### Step 4: Aggregation Framework (Week 2)
 - [ ] Implement async_aggregate

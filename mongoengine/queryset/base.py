@@ -2519,3 +2519,159 @@ class BaseQuerySet:
         )
         
         return result.deleted_count
+    
+    async def async_aggregate(self, pipeline, **kwargs):
+        """Execute an aggregation pipeline asynchronously.
+        
+        If the queryset contains a query or skip/limit/sort or if the target Document class
+        uses inheritance, this method will add steps prior to the provided pipeline in an arbitrary order.
+        This may affect the performance or outcome of the aggregation, so use it consciously.
+        
+        For complex/critical pipelines, we recommended to use the aggregation framework of PyMongo directly,
+        it is available through the collection object (YourDocument._async_collection.aggregate) and will guarantee
+        that you have full control on the pipeline.
+        
+        :param pipeline: list of aggregation commands,
+            see: https://www.mongodb.com/docs/manual/core/aggregation-pipeline/
+        :param kwargs: (optional) kwargs dictionary to be passed to pymongo's aggregate call
+            See https://pymongo.readthedocs.io/en/stable/api/pymongo/collection.html#pymongo.collection.Collection.aggregate
+        :return: AsyncCommandCursor with results
+        """
+        from mongoengine.connection import DEFAULT_CONNECTION_NAME
+        alias = self._document._meta.get("db_alias", DEFAULT_CONNECTION_NAME)
+        ensure_async_connection(alias)
+        
+        if not isinstance(pipeline, (tuple, list)):
+            raise TypeError(
+                f"Starting from 1.0 release pipeline must be a list/tuple, received: {type(pipeline)}"
+            )
+        
+        initial_pipeline = []
+        if self._none or self._empty:
+            initial_pipeline.append({"$limit": 1})
+            initial_pipeline.append({"$match": {"$expr": False}})
+        
+        if self._query:
+            initial_pipeline.append({"$match": self._query})
+        
+        if self._ordering:
+            initial_pipeline.append({"$sort": dict(self._ordering)})
+        
+        if self._limit is not None:
+            # As per MongoDB Documentation (https://www.mongodb.com/docs/manual/reference/operator/aggregation/limit/),
+            # keeping limit stage right after sort stage is more efficient. But this leads to wrong set of documents
+            # for a skip stage that might succeed these. So we need to maintain more documents in memory in such a
+            # case (https://stackoverflow.com/a/24161461).
+            initial_pipeline.append({"$limit": self._limit + (self._skip or 0)})
+        
+        if self._skip is not None:
+            initial_pipeline.append({"$skip": self._skip})
+        
+        # geoNear and collStats must be the first stages in the pipeline if present
+        first_step = []
+        new_user_pipeline = []
+        for step_step in pipeline:
+            if "$geoNear" in step_step:
+                first_step.append(step_step)
+            elif "$collStats" in step_step:
+                first_step.append(step_step)
+            else:
+                new_user_pipeline.append(step_step)
+        
+        final_pipeline = first_step + initial_pipeline + new_user_pipeline
+        
+        collection = await self._async_get_collection()
+        if self._read_preference is not None or self._read_concern is not None:
+            collection = collection.with_options(
+                read_preference=self._read_preference, read_concern=self._read_concern
+            )
+        
+        if self._hint not in (-1, None):
+            kwargs.setdefault("hint", self._hint)
+        if self._collation:
+            kwargs.setdefault("collation", self._collation)
+        if self._comment:
+            kwargs.setdefault("comment", self._comment)
+        
+        # Get async session if available
+        from mongoengine.async_utils import _get_async_session
+        session = await _get_async_session()
+        if session:
+            kwargs["session"] = session
+        
+        return await collection.aggregate(
+            final_pipeline,
+            cursor={},
+            **kwargs,
+        )
+    
+    async def async_distinct(self, field):
+        """Get distinct values for a field asynchronously.
+        
+        :param field: the field to get distinct values for
+        :return: list of distinct values
+        
+        .. note:: This is a command and won't take ordering or limit into
+           account.
+        """
+        from mongoengine.connection import DEFAULT_CONNECTION_NAME
+        alias = self._document._meta.get("db_alias", DEFAULT_CONNECTION_NAME)
+        ensure_async_connection(alias)
+        
+        queryset = self.clone()
+        
+        try:
+            field = self._fields_to_dbfields([field]).pop()
+        except LookUpError:
+            pass
+        
+        collection = await self._async_get_collection()
+        
+        # Get async session if available
+        from mongoengine.async_utils import _get_async_session
+        session = await _get_async_session()
+        
+        raw_values = await collection.distinct(field, filter=queryset._query, session=session)
+        
+        if not self._auto_dereference:
+            return raw_values
+        
+        distinct = self._dereference(raw_values, 1, name=field, instance=self._document)
+        
+        doc_field = self._document._fields.get(field.split(".", 1)[0])
+        instance = None
+        
+        # We may need to cast to the correct type eg. ListField(EmbeddedDocumentField)
+        EmbeddedDocumentField = _import_class("EmbeddedDocumentField")
+        ListField = _import_class("ListField")
+        GenericEmbeddedDocumentField = _import_class("GenericEmbeddedDocumentField")
+        if isinstance(doc_field, ListField):
+            doc_field = getattr(doc_field, "field", doc_field)
+        if isinstance(doc_field, (EmbeddedDocumentField, GenericEmbeddedDocumentField)):
+            instance = getattr(doc_field, "document_type", None)
+        
+        # handle distinct on subdocuments
+        if "." in field:
+            for field_part in field.split(".")[1:]:
+                # if looping on embedded document, get the document type instance
+                if instance and isinstance(
+                    doc_field, (EmbeddedDocumentField, GenericEmbeddedDocumentField)
+                ):
+                    doc_field = instance._fields.get(field_part)
+                    if isinstance(doc_field, ListField):
+                        doc_field = getattr(doc_field, "field", doc_field)
+                    instance = getattr(doc_field, "document_type", None)
+                    continue
+                doc_field = None
+        
+        # Cast each distinct value to the correct type
+        if self._none or self._empty:
+            return []
+        
+        if doc_field and not isinstance(distinct, list):
+            distinct = [distinct]
+        
+        if instance:
+            distinct = [instance._from_son(d) for d in distinct]
+        
+        return distinct
