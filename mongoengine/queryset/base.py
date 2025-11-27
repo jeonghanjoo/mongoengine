@@ -2526,7 +2526,7 @@ class BaseQuerySet:
         :param upsert: insert if document doesn't exist (default False)
         :param multi: update multiple documents (default True)
         :param write_concern: write concern options
-        :param update: update operations to perform
+        :param update: Django-style update keyword arguments
         :returns: number of documents affected
         """
         from mongoengine.connection import DEFAULT_CONNECTION_NAME
@@ -2534,47 +2534,29 @@ class BaseQuerySet:
         alias = self._document._meta.get("db_alias", DEFAULT_CONNECTION_NAME)
         ensure_async_connection(alias)
 
-        if not update:
-            raise OperationError("No update parameters passed")
+        if not update and not upsert:
+            raise OperationError("No update parameters, would remove data")
 
         queryset = self.clone()
         query = queryset._query
 
-        # Process the update dict to handle field names and operators
-        update_dict = {}
-        for key, value in update.items():
-            # Handle operators like inc__field, set__field, etc.
-            if "__" in key and key.split("__")[0] in [
-                "inc",
-                "set",
-                "unset",
-                "push",
-                "pull",
-                "pull_all",
-                "addToSet",
-            ]:
-                op, field = key.split("__", 1)
-                # Convert pull_all to pullAll for MongoDB
-                if op == "pull_all":
-                    mongo_op = "$pullAll"
-                else:
-                    mongo_op = f"${op}"
-                if mongo_op not in update_dict:
-                    update_dict[mongo_op] = {}
-                field_name = queryset._document._translate_field_name(field)
-                update_dict[mongo_op][field_name] = value
-            elif key.startswith("$"):
-                # Direct MongoDB operator
-                update_dict[key] = {}
-                for field_name, field_value in value.items():
-                    field_name = queryset._document._translate_field_name(field_name)
-                    update_dict[key][field_name] = field_value
+        # Use transform.update to handle all operators consistently with sync version
+        if "__raw__" in update and isinstance(update["__raw__"], list):
+            # Case of Update with Aggregation Pipeline
+            update_dict = [
+                transform.update(queryset._document, **{"__raw__": u})
+                for u in update["__raw__"]
+            ]
+        else:
+            update_dict = transform.update(queryset._document, **update)
+
+        # If doing an atomic upsert on an inheritable class
+        # then ensure we add _cls to the update operation
+        if upsert and "_cls" in query:
+            if "$set" in update_dict:
+                update_dict["$set"]["_cls"] = queryset._document._class_name
             else:
-                # Direct field update - wrap in $set
-                if "$set" not in update_dict:
-                    update_dict["$set"] = {}
-                key = queryset._document._translate_field_name(key)
-                update_dict["$set"][key] = value
+                update_dict["$set"] = {"_cls": queryset._document._class_name}
 
         collection = await self._async_get_collection()
 

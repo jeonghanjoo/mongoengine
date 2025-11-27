@@ -283,6 +283,61 @@ class TestAsyncQuerySet:
         assert len(old_authors) == 2
 
     @pytest.mark.asyncio
+    async def test_async_update_add_to_set(self):
+        """Test async_update() with add_to_set operator."""
+        # Create a book with some tags
+        book = await AsyncBook.objects.async_create(
+            title="Test Book", pages=100, tags=["python"]
+        )
+
+        # Add a new tag using add_to_set
+        updated = await AsyncBook.objects.filter(id=book.id).async_update(
+            add_to_set__tags="mongodb"
+        )
+        assert updated == 1
+
+        # Verify the tag was added
+        book = await AsyncBook.objects.async_get(id=book.id)
+        assert "python" in book.tags
+        assert "mongodb" in book.tags
+        assert len(book.tags) == 2
+
+        # Try to add duplicate tag - should not add
+        await AsyncBook.objects.filter(id=book.id).async_update(
+            add_to_set__tags="python"
+        )
+        book = await AsyncBook.objects.async_get(id=book.id)
+        assert len(book.tags) == 2  # Still 2, no duplicate
+
+    @pytest.mark.asyncio
+    async def test_async_update_operators(self):
+        """Test async_update() with various operators."""
+        # Create a book
+        book = await AsyncBook.objects.async_create(
+            title="Test Book", pages=100, tags=["a", "b"]
+        )
+
+        # Test push operator
+        await AsyncBook.objects.filter(id=book.id).async_update(push__tags="c")
+        book = await AsyncBook.objects.async_get(id=book.id)
+        assert book.tags == ["a", "b", "c"]
+
+        # Test pull operator
+        await AsyncBook.objects.filter(id=book.id).async_update(pull__tags="b")
+        book = await AsyncBook.objects.async_get(id=book.id)
+        assert book.tags == ["a", "c"]
+
+        # Test set operator
+        await AsyncBook.objects.filter(id=book.id).async_update(set__pages=200)
+        book = await AsyncBook.objects.async_get(id=book.id)
+        assert book.pages == 200
+
+        # Test unset operator
+        await AsyncBook.objects.filter(id=book.id).async_update(unset__pages=1)
+        book = await AsyncBook.objects.async_get(id=book.id)
+        assert book.pages is None
+
+    @pytest.mark.asyncio
     async def test_async_update_one(self):
         """Test async_update_one() method."""
         # Create some authors
